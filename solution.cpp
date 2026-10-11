@@ -2,105 +2,130 @@
 #include <vector>
 #include <queue>
 #include <algorithm>
+#include <stack>
 using namespace std;
 
 vector<vector<int>> adj;
-vector<int> color;
+vector<int> disc, low;
 vector<bool> visited;
-vector<int> degree;
 vector<int> component;
-vector<bool> in_non_bipartite_component;
+vector<bool> can_be_invited;
+int timer, n;
 
-bool is_bipartite_component(int start, int comp_id) {
-    queue<int> q;
-    q.push(start);
-    color[start] = 0;
-    component[start] = comp_id;
-    bool bipartite = true;
+vector<int> vertex_stack;
+vector<vector<int>> biconnected_components;
+
+void dfs(int u, int parent) {
+    visited[u] = true;
+    disc[u] = low[u] = ++timer;
+    vertex_stack.push_back(u);
+    int children = 0;
     
-    while (!q.empty()) {
-        int u = q.front();
-        q.pop();
+    for (int v : adj[u]) {
+        if (v == parent) continue;
         
-        for (int v : adj[u]) {
-            if (component[v] == -1) {
-                component[v] = comp_id;
-                color[v] = 1 - color[u];
-                q.push(v);
-            } else if (color[v] == color[u]) {
-                bipartite = false;
+        if (visited[v]) {
+            low[u] = min(low[u], disc[v]);
+        } else {
+            children++;
+            dfs(v, u);
+            low[u] = min(low[u], low[v]);
+            
+            if ((parent == -1 && children > 1) || (parent != -1 && low[v] >= disc[u])) {
+                // u is an articulation point, extract biconnected component
+                vector<int> component;
+                while (true) {
+                    int w = vertex_stack.back();
+                    vertex_stack.pop_back();
+                    component.push_back(w);
+                    if (w == v) break;
+                }
+                component.push_back(u);
+                biconnected_components.push_back(component);
+            }
+        }
+    }
+}
+
+bool is_bipartite_subgraph(const vector<int>& vertices) {
+    vector<int> color;
+    vector<int> vertex_to_index;
+    int k = vertices.size();
+    
+    color.resize(k, -1);
+    vertex_to_index.resize(n + 1, -1);
+    
+    for (int i = 0; i < k; i++) {
+        vertex_to_index[vertices[i]] = i;
+    }
+    
+    for (int i = 0; i < k; i++) {
+        if (color[i] == -1) {
+            queue<int> q;
+            q.push(i);
+            color[i] = 0;
+            
+            while (!q.empty()) {
+                int u_idx = q.front();
+                q.pop();
+                int u = vertices[u_idx];
+                
+                for (int v : adj[u]) {
+                    if (vertex_to_index[v] == -1) continue;
+                    
+                    int v_idx = vertex_to_index[v];
+                    if (color[v_idx] == -1) {
+                        color[v_idx] = 1 - color[u_idx];
+                        q.push(v_idx);
+                    } else if (color[v_idx] == color[u_idx]) {
+                        return false; // Not bipartite
+                    }
+                }
             }
         }
     }
     
-    return bipartite;
+    return true;
 }
 
 int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
     
-    int n, m;
+    int m;
     cin >> n >> m;
     
     adj.resize(n + 1);
-    color.resize(n + 1, -1);
+    disc.resize(n + 1, 0);
+    low.resize(n + 1, 0);
     visited.resize(n + 1, false);
-    degree.resize(n + 1, 0);
-    component.resize(n + 1, -1);
+    can_be_invited.resize(n + 1, false);
+    timer = 0;
     
     for (int i = 0; i < m; i++) {
         int u, v;
         cin >> u >> v;
         adj[u].push_back(v);
         adj[v].push_back(u);
-        degree[u]++;
-        degree[v]++;
     }
     
-    // Find connected components and check if each is bipartite
-    vector<bool> component_is_bipartite;
-    int comp_count = 0;
-    
+    // Find biconnected components using Tarjan's algorithm
     for (int i = 1; i <= n; i++) {
-        if (component[i] == -1) {
-            bool bipartite = is_bipartite_component(i, comp_count);
-            component_is_bipartite.push_back(bipartite);
-            comp_count++;
+        if (!visited[i]) {
+            dfs(i, -1);
+            if (!vertex_stack.empty()) {
+                biconnected_components.push_back(vertex_stack);
+                vertex_stack.clear();
+            }
         }
     }
     
-    // Mark vertices in non-bipartite components
-    in_non_bipartite_component.resize(n + 1, false);
-    for (int i = 1; i <= n; i++) {
-        if (!component_is_bipartite[component[i]]) {
-            in_non_bipartite_component[i] = true;
-        }
-    }
-    
-    // Find 2-core for each non-bipartite component
-    vector<bool> can_be_invited(n + 1, false);
-    queue<int> q;
-    
-    // Start with vertices of degree 1 in non-bipartite components
-    for (int i = 1; i <= n; i++) {
-        if (in_non_bipartite_component[i] && degree[i] <= 1) {
-            q.push(i);
-        }
-    }
-    
-    // Remove vertices of degree <= 1 iteratively
-    while (!q.empty()) {
-        int u = q.front();
-        q.pop();
-        in_non_bipartite_component[u] = false;
-        
-        for (int v : adj[u]) {
-            if (in_non_bipartite_component[v]) {
-                degree[v]--;
-                if (degree[v] <= 1) {
-                    q.push(v);
-                }
+    // For each biconnected component, check if it's non-bipartite
+    for (const auto& comp : biconnected_components) {
+        if (comp.size() >= 3 && !is_bipartite_subgraph(comp)) {
+            // This component contains odd cycles
+            for (int vertex : comp) {
+                can_be_invited[vertex] = true;
             }
         }
     }
@@ -108,7 +133,7 @@ int main() {
     // Count vertices that cannot be invited
     int answer = 0;
     for (int i = 1; i <= n; i++) {
-        if (!in_non_bipartite_component[i]) {
+        if (!can_be_invited[i]) {
             answer++;
         }
     }
